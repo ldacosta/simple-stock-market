@@ -28,17 +28,15 @@ turtles-own [
 ;; bids and asks
 
 to add-ask [ agent-id ask-value ]
-  print (word "[agent " agent-id "] Adding ask "  ask-value)
+  (remove-asking-from agent-id) ;; if the agent is asking again, we assume it wants to forget about the first thing
   set stock_asks (lput (list agent-id ask-value) stock_asks)
   set stock_asks sort-by [ [tuple1 tuple2] -> (item 1 tuple1) < (item 1 tuple2) ] stock_asks ;; smaller asks come out first
-  print (word "asks => " stock_asks)
 end
 
 to add-bid [ agent-id bid-value ]
-  print (word "[agent " agent-id "] Adding bid "  bid-value)
+  (remove-bidding-from agent-id) ;; if the agent is bidding again, we assume it wants to forget about the first thing
   set stock_bids (lput (list agent-id bid-value) stock_bids)
   set stock_bids sort-by [ [tuple1 tuple2] -> (item 1 tuple1) > (item 1 tuple2) ] stock_bids ;; larger bids come out first
-  print (word "bids => " stock_bids)
 end
 
 to-report exists_ask
@@ -50,26 +48,63 @@ to-report exists_bid
 end
 
 to-report lowest_ask
-  report (item 1 (item 0 stock_asks))
+  report (item 1 (first stock_asks))
 end
 
 to-report highest_bid
-  report (item 1 (item 0 stock_bids))
+  report (item 1 (first stock_bids))
 end
 
 to-report market-spread
   ifelse exists_ask and exists_bid [report lowest_ask - highest_bid] [report 0]
 end
 
+to-report agent-bidding [ ag-id ]
+  report agent-participating ag-id stock_bids
+end
+
+to-report agent-asking [ ag-id ]
+  report agent-participating ag-id stock_asks
+end
+
+to-report agent-participating [ ag-id list_of_ids_and_values ]
+  foreach list_of_ids_and_values [ id_and_value ->
+    if (first id_and_value = ag-id) [ report true ]
+  ]
+  report false
+end
+
+to-report delete-agent-reference-in [ ag-id list_of_ids_and_values ]
+  report filter [ id_and_value -> not (first id_and_value = ag-id) ] list_of_ids_and_values
+end
+
+to remove-bidding-from [ ag-id ]
+  set stock_bids (delete-agent-reference-in ag-id stock_bids)
+end
+
+to remove-asking-from [ ag-id ]
+  set stock_asks (delete-agent-reference-in ag-id stock_asks)
+end
+
 to test-asks-and-bids
   add-ask 101 10
   add-ask 102 20
   add-ask 103 5
+  print (word "asks => " stock_asks)
   print (word "Lowest ask is " lowest_ask)
+  (remove-asking-from 102)
+  print (word "Removing agent 102 from asking => " stock_asks)
+  (remove-asking-from 444)
+  print (word "Removing agent 444 from asking => " stock_asks)
   add-bid 101 10
   add-bid 102 20
   add-bid 103 5
+  print (word "bids => " stock_bids)
   print (word "Highest bid is " highest_bid)
+  (remove-bidding-from 102)
+  print (word "Removing agent 102 from bidding => " stock_bids)
+  (remove-bidding-from 333)
+  print (word "Removing agent 333 from bidding => " stock_bids)
 end
 
 ;; setup
@@ -157,16 +192,42 @@ end
 to try-to-buy-or-sell
   ask turtles [
     ;; selling?
-    ifelse (money <= 1.5 * foodprice) [ ;; this agent is desperate
-      print (word "Agent " who " is desperate: it has " money "$, and food is " foodprice)
-      if exists_bid [
-        add-ask who highest_bid
+    if (num-stocks > 0) [
+      ifelse (money <= 1.5 * foodprice) [ ;; this agent is desperate
+        ;; print (word "Agent " who " is desperate: it has " money "$, and food is " foodprice)
+        if exists_bid [
+          add-ask who highest_bid
+        ]
+      ]
+      [
+        if (not exists_ask) or (lowest_ask > optimalpricestock) [
+          add-ask who optimalpricestock
+        ]
       ]
     ]
-    [
-      if (not exists_ask) or (lowest_ask > optimalpricestock) [
-        add-ask who optimalpricestock
+    ;; buying?
+    if (money > optimalpricestock) [
+      if exists_ask and (lowest_ask <= optimalpricestock) [
+        add-bid who optimalpricestock
       ]
+    ]
+  ]
+  ;; let's match markets:
+  match-market
+  if exists_ask and exists_bid [
+    if lowest_ask < highest_bid [
+      print (word "lowest ask = " lowest_ask ", highest_bid = " highest_bid)
+    ]
+  ]
+end
+
+to match-market
+  if exists_ask and exists_bid [
+    if lowest_ask < highest_bid [
+      print (word "lowest ask = " lowest_ask ", highest_bid = " highest_bid)
+      set stock_bids (but-first stock_bids) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; <========== MISSING ACTUALLY GIVING MONEY, TAKING MONEY!!!!!!
+      set stock_asks (but-first stock_asks)
+      print (word "num asks = " (length stock_asks) ", num bids = " (length stock_bids))
     ]
   ]
 end
@@ -260,7 +321,6 @@ to update-lorenz-and-gini
 ;;      (wealth-sum-so-far / total-wealth)
 ;;  ]
 end
-
 
 
 
@@ -376,7 +436,7 @@ number-of-agents
 number-of-agents
 0
 10000
-4190.0
+1620.0
 10
 1
 individuals
