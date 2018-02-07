@@ -4,9 +4,11 @@ globals [
   turtle-reproduction-cost ;; (unit: energy units) when an agent reproduces, how many units of energy does he lose?
   foodprice ;; (unit: money) positive value: how many money units does a piece of food cost?
   max_foodprice_init ;; (unit: money) positive value: how many MAX money units does a piece of food cost?
+  max_stockprice_init ;; (unit: money) positive value: how many MAX money units does a share of stock cost?
   min_turtleenergy ;; (unit: energy units) Below this level of energy the agent gets "desperate" for food.
   stock_asks ;; (unit: list of list of agent-id,amount. So ~ [[4,25], [5,31]]) What are agents asking for their stocks.
   stock_bids ;; (unit: list of list of agent-id,amount. So ~ [[14,31], [5,21]]) What are agents prepared to pay for stocks.
+  total-num-stocks ;; (unit: int) number of stocks in the market
 ]
 patches-own [
   p_foodappearonticks ;; value of ticks when food will appear here (if it's in the past => means that food is present)
@@ -14,21 +16,41 @@ patches-own [
 
 turtles-own [
   optimalpricefood ;; price that an agent is ready to pay for food
+  optimalpricestock ;; price that an agent thinks it's fait for a stock share
   energy ;; (unit: energy units) energy the agent has
-  reproduce-freq ;; (unit: ticks) Probabilistically, how often this agent clones itself.
+  reproduce-freq ;; (unit: ticks) Probabilistically, how often this agent clones itself
   money ;; (unit: money units) how much money any agent owns
+  num-stocks ;; (unit: int) how many stocks do I own
 ]
 
 ;; bids and asks
 
 to add-ask [ agent-id ask-value ]
+  print (word "[agent " agent-id "] Adding ask "  ask-value)
   set stock_asks (lput (list agent-id ask-value) stock_asks)
   set stock_asks sort-by [ [tuple1 tuple2] -> (item 1 tuple1) < (item 1 tuple2) ] stock_asks ;; smaller asks come out first
+  print stock_asks
 end
 
 to add-bid [ agent-id bid-value ]
   set stock_bids (lput (list agent-id bid-value) stock_bids)
   set stock_bids sort-by [ [tuple1 tuple2] -> (item 1 tuple1) > (item 1 tuple2) ] stock_bids ;; larger bids come out first
+end
+
+to-report exists_ask
+  report not empty? stock_asks
+end
+
+to-report exists_bid
+  report not empty? stock_asks
+end
+
+to-report lowest_ask
+  report (item 1 (item 0 stock_asks))
+end
+
+to-report highest_bid
+  report (item 1 (item 0 stock_bids))
 end
 
 ;; setup
@@ -38,10 +60,12 @@ to setup-globals
   set food-energy 10
   set turtle-reproduction-cost food-energy * 10
   set max_foodprice_init 100
+  set max_stockprice_init 1000
   set foodprice random max_foodprice_init
   set min_turtleenergy random 10
   set stock_bids []
   set stock_asks []
+  set total-num-stocks (number-of-agents + (random 9 * number-of-agents))
 end
 
 to setup
@@ -60,11 +84,21 @@ end
 to setup-turtles
   create-turtles number-of-agents [
     setxy random-xcor random-ycor
-    set optimalpricefood random max_foodprice_init
+    set optimalpricefood (1 + random max_foodprice_init)
+    set optimalpricestock (1 + random max_stockprice_init)
     set energy (random 10) + min_turtleenergy
     set color white
     set reproduce-freq (random 100)
     set money random 2 * foodprice
+    set num-stocks 0
+  ]
+  ;; go around distributing stocks:
+  while [total-num-stocks > 0] [
+    ask one-of turtles [
+      set money (money - optimalpricestock)
+      set num-stocks (num-stocks + 1)
+    ]
+    set total-num-stocks (total-num-stocks - 1)
   ]
 end
 
@@ -85,16 +119,18 @@ end
 to go
   move-turtles
   try-to-eat
-  ;; try-to-buy-or-sell
+  try-to-buy-or-sell
   draw-patches
   tick
 end
 
 to try-to-buy-or-sell
   ask turtles [
-    add-bid who (random 10)
+    ;; selling?
+    if (not exists_ask) or (lowest_ask > optimalpricefood) [
+      add-ask who optimalpricefood
+    ]
   ]
-  show stock_bids
 end
 
 to check-death
@@ -147,7 +183,6 @@ to try-to-eat
     ]
   ]
 end
-
 @#$#@#$#@
 GRAPHICS-WINDOW
 204
