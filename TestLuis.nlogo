@@ -9,6 +9,8 @@ globals [
   stock_asks ;; (unit: list of list of agent-id,amount. So ~ [[4,25], [5,31]]) What are agents asking for their stocks.
   stock_bids ;; (unit: list of list of agent-id,amount. So ~ [[14,31], [5,21]]) What are agents prepared to pay for stocks.
   total-num-stocks ;; (unit: int) number of stocks in the market
+  gini-index-reserve ;; (unit: int)
+  lorenz-points;; (unit: list)
 ]
 patches-own [
   p_foodappearonticks ;; value of ticks when food will appear here (if it's in the past => means that food is present)
@@ -29,12 +31,14 @@ to add-ask [ agent-id ask-value ]
   print (word "[agent " agent-id "] Adding ask "  ask-value)
   set stock_asks (lput (list agent-id ask-value) stock_asks)
   set stock_asks sort-by [ [tuple1 tuple2] -> (item 1 tuple1) < (item 1 tuple2) ] stock_asks ;; smaller asks come out first
-  print stock_asks
+  print (word "asks => " stock_asks)
 end
 
 to add-bid [ agent-id bid-value ]
+  print (word "[agent " agent-id "] Adding bid "  bid-value)
   set stock_bids (lput (list agent-id bid-value) stock_bids)
   set stock_bids sort-by [ [tuple1 tuple2] -> (item 1 tuple1) > (item 1 tuple2) ] stock_bids ;; larger bids come out first
+  print (word "bids => " stock_bids)
 end
 
 to-report exists_ask
@@ -42,7 +46,7 @@ to-report exists_ask
 end
 
 to-report exists_bid
-  report not empty? stock_asks
+  report not empty? stock_bids
 end
 
 to-report lowest_ask
@@ -51,6 +55,21 @@ end
 
 to-report highest_bid
   report (item 1 (item 0 stock_bids))
+end
+
+to-report market-spread
+  ifelse exists_ask and exists_bid [report lowest_ask - highest_bid] [report 0]
+end
+
+to test-asks-and-bids
+  add-ask 101 10
+  add-ask 102 20
+  add-ask 103 5
+  print (word "Lowest ask is " lowest_ask)
+  add-bid 101 10
+  add-bid 102 20
+  add-bid 103 5
+  print (word "Highest bid is " highest_bid)
 end
 
 ;; setup
@@ -89,16 +108,26 @@ to setup-turtles
     set energy (random 10) + min_turtleenergy
     set color white
     set reproduce-freq (random 100)
-    set money random 2 * foodprice
+    set money ((optimalpricefood + optimalpricestock) + (random (optimalpricefood + optimalpricestock)))
     set num-stocks 0
+  ]
+  ;; how much money do we need, in the worst of cases, to buy all stocks?
+  let maxoptimalstockprice (max [optimalpricestock] of turtles)
+  let total-money (maxoptimalstockprice * total-num-stocks)
+  let money-per-agent total-money / number-of-agents
+  print ( word "Max stock price: " maxoptimalstockprice ", " total-num-stocks " to distribute => total money needed = " total-money " (" money-per-agent "$ per agent)")
+  ask turtles [
+    set money money-per-agent
   ]
   ;; go around distributing stocks:
   while [total-num-stocks > 0] [
     ask one-of turtles [
-      set money (money - optimalpricestock)
-      set num-stocks (num-stocks + 1)
+      if money >= (optimalpricestock + optimalpricefood) [
+        set money (money - optimalpricestock)
+        set num-stocks (num-stocks + 1)
+        set total-num-stocks (total-num-stocks - 1)
+      ]
     ]
-    set total-num-stocks (total-num-stocks - 1)
   ]
 end
 
@@ -121,14 +150,23 @@ to go
   try-to-eat
   try-to-buy-or-sell
   draw-patches
+  update-lorenz-and-gini
   tick
 end
 
 to try-to-buy-or-sell
   ask turtles [
     ;; selling?
-    if (not exists_ask) or (lowest_ask > optimalpricefood) [
-      add-ask who optimalpricefood
+    ifelse (money <= 1.5 * foodprice) [ ;; this agent is desperate
+      print (word "Agent " who " is desperate: it has " money "$, and food is " foodprice)
+      if exists_bid [
+        add-ask who highest_bid
+      ]
+    ]
+    [
+      if (not exists_ask) or (lowest_ask > optimalpricestock) [
+        add-ask who optimalpricestock
+      ]
     ]
   ]
 end
@@ -144,11 +182,12 @@ to try-to-reproduce
     if (energy > turtle-reproduction-cost) and (reproduce-freq > 0) and ((random-float 1) <= (1 / reproduce-freq)) [
       hatch 1 [
         setxy xcor ycor
-        set optimalpricefood ((random-float 1) + 0.5) * optimalpricefood
+        set optimalpricefood (random-normal 1 0.1) * optimalpricefood
+        ;; set optimalpricefood ((random-float 1) + 0.5) * optimalpricefood
         set energy (random 10) + min_turtleenergy
         set color white
         set reproduce-freq reproduce-freq
-        set money random 2 * foodprice
+        set money foodprice + (random 2 * foodprice)
       ]
     ]
   ]
@@ -174,15 +213,59 @@ end
 to try-to-eat
   ask turtles [
     if p_foodappearonticks <= ticks [ ;; there is food to be eaten
-      if energy <= min_turtleenergy or foodprice <= optimalpricefood [ ;; turtle is eating the piece of food!
+      if (energy <= min_turtleenergy or foodprice <= optimalpricefood) and (money >= foodprice) [ ;; turtle is eating the piece of food!
         set p_foodappearonticks ticks + food-regeneration-freq ;; set up when energy will re-appear
-        set foodprice optimalpricefood ;; since I just bought it, this is the price of the food
         set energy (energy + food-energy)
-        set money (money - optimalpricefood)
+        set money (money - foodprice)
+        set foodprice optimalpricefood ;; since I just bought it, this is the price of the food
       ]
     ]
   ]
 end
+
+
+
+; this procedure recomputes the value of gini-index-reserve
+;; and the points in lorenz-points for the Lorenz and Gini-Index plots
+to update-lorenz-and-gini
+  let sorted-wealths sort [money] of turtles
+  let total-wealth sum sorted-wealths
+  let wealth-sum-so-far 0
+  let index 0
+  set gini-index-reserve 0
+  set lorenz-points []
+
+  ;; now actually plot the Lorenz curve -- along the way, we also
+  ;; calculate the Gini index.
+  ;; (see the Info tab for a description of the curve and measure)
+  foreach sorted-wealths [ current-wealth ->
+    set wealth-sum-so-far (wealth-sum-so-far + current-wealth)
+    set lorenz-points lput ((wealth-sum-so-far / total-wealth) * 100) lorenz-points
+    set index (index + 1)
+    set gini-index-reserve
+      gini-index-reserve +
+      (index / number-of-agents) -
+      (wealth-sum-so-far / total-wealth)
+  ]
+
+
+
+;;  repeat number-of-agents [
+;;    set wealth-sum-so-far (wealth-sum-so-far + item index sorted-wealths)
+;;    set lorenz-points lput ((wealth-sum-so-far / total-wealth) * 100) lorenz-points
+;;    set index (index + 1)
+;;    set gini-index-reserve
+;;      gini-index-reserve +
+;;      (index / number-of-agents) -
+;;      (wealth-sum-so-far / total-wealth)
+;;  ]
+end
+
+
+
+
+
+
 @#$#@#$#@
 GRAPHICS-WINDOW
 204
@@ -261,7 +344,7 @@ true
 true
 "" ""
 PENS
-"foodprice" 1.0 0 -16777216 true "" "plot p_foodprice"
+"foodprice" 1.0 0 -16777216 true "" "plot foodprice"
 "price bid (mean)" 1.0 0 -7500403 true "" "plot mean [optimalpricefood] of turtles"
 "price bid (std dev)" 1.0 0 -2674135 true "" "plot standard-deviation [optimalpricefood] of turtles"
 
@@ -293,11 +376,64 @@ number-of-agents
 number-of-agents
 0
 10000
-420.0
+4190.0
 10
 1
 individuals
 HORIZONTAL
+
+BUTTON
+45
+277
+197
+310
+NIL
+test-asks-and-bids
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+0
+
+PLOT
+1128
+540
+1328
+690
+Gini index
+NIL
+NIL
+0.0
+10.0
+0.0
+1.0
+true
+true
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot (gini-index-reserve / number-of-agents) / 0.5"
+
+PLOT
+1184
+294
+1384
+444
+Market Spread
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot market-spread"
 
 @#$#@#$#@
 ## WHAT IS IT?
