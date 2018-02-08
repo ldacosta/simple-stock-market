@@ -51,8 +51,16 @@ to-report lowest_ask
   report (item 1 (first stock_asks))
 end
 
+to-report id_for_lowest_ask
+  report (item 0 (first stock_asks))
+end
+
 to-report highest_bid
   report (item 1 (first stock_bids))
+end
+
+to-report id_for_highest_bid
+  report (item 0 (first stock_bids))
 end
 
 to-report market-spread
@@ -181,6 +189,7 @@ end
 ;; movements
 
 to go
+  if not any? turtles [ stop ]
   move-turtles
   try-to-eat
   try-to-buy-or-sell
@@ -191,50 +200,80 @@ end
 
 to try-to-buy-or-sell
   ask turtles [
+    ;; first of all: if I am bidding, but I don't have money to cover that deal, retreat it
+    if (exists_ask and money < lowest_ask) [
+      ;; print (word "Agent " who " was bidding, but now it can't cover the lowest ask (that is " lowest_ask "; agent's money is " money ". Retrieving bid.")
+      remove-bidding-from who
+    ]
     ;; selling?
-    if (num-stocks > 0) [
-      ifelse (money <= 1.5 * foodprice) [ ;; this agent is desperate
-        ;; print (word "Agent " who " is desperate: it has " money "$, and food is " foodprice)
-        if exists_bid [
-          add-ask who highest_bid
+    if not (agent-bidding who) [ ;; if I am bidding, I can't be asking
+      if (num-stocks > 0) [
+        ifelse (money <= 1.5 * foodprice) [ ;; this agent is desperate
+                                            ;; print (word "Agent " who " is desperate: it has " money "$, and food is " foodprice)
+          if exists_bid [
+            add-ask who highest_bid
+          ]
         ]
-      ]
-      [
-        if (not exists_ask) or (lowest_ask > optimalpricestock) [
-          add-ask who optimalpricestock
+        [
+          if (not exists_ask) or (lowest_ask > optimalpricestock) [
+            add-ask who optimalpricestock
+          ]
         ]
       ]
     ]
     ;; buying?
-    if (money > optimalpricestock) [
-      if exists_ask and (lowest_ask <= optimalpricestock) [
-        add-bid who optimalpricestock
+    if not (agent-asking who) [ ;; if I am asking, I can't be bidding
+      if (money > optimalpricestock) [
+        if exists_ask and (lowest_ask <= optimalpricestock) [
+          add-bid who lowest_ask ;; I match the offer
+        ]
       ]
     ]
   ]
   ;; let's match markets:
   match-market
-  if exists_ask and exists_bid [
-    if lowest_ask < highest_bid [
-      print (word "lowest ask = " lowest_ask ", highest_bid = " highest_bid)
-    ]
-  ]
 end
 
 to match-market
   if exists_ask and exists_bid [
-    if lowest_ask < highest_bid [
-      print (word "lowest ask = " lowest_ask ", highest_bid = " highest_bid)
+    let the_ask lowest_ask
+    if the_ask <= highest_bid [
+      print (word "[matching market] lowest ask = " the_ask ", highest_bid = " highest_bid)
+      ;; DEBUGGING: report on turtles involved in transaction
+      ;;ask turtle id_for_lowest_ask [
+      ;;  print (word "====> turtle " who " is ASKING; it has " num-stocks " stocks and " money " $")
+      ;;]
+      ;;ask turtle id_for_highest_bid [
+      ;;  print (word "====> turtle " who " is TOP BIDDER; it has " num-stocks " stocks and " money " $")
+      ;;]
+      ;; update turtles involved in transaction
+      ask turtle id_for_lowest_ask [
+        set num-stocks (num-stocks - 1)
+        set money (money + the_ask)
+        print (word "====> turtle " who " got paid " the_ask " $; it has now " num-stocks " stocks and " money " $")
+      ]
+      ask turtle id_for_highest_bid [
+        set num-stocks (num-stocks + 1)
+        set money (money - the_ask)
+        print (word "====> turtle " who " paid " the_ask " $ for a stock; it has now " num-stocks " stocks and " money " $")
+      ]
+      ;; update asks and bids
       set stock_bids (but-first stock_bids) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; <========== MISSING ACTUALLY GIVING MONEY, TAKING MONEY!!!!!!
       set stock_asks (but-first stock_asks)
-      print (word "num asks = " (length stock_asks) ", num bids = " (length stock_bids))
+      print (word "[END matching market] num asks = " (length stock_asks) ", num bids = " (length stock_bids))
+      ;; and we do it until all matches are satisfied:
+      match-market
     ]
   ]
 end
 
 to check-death
   ask turtles [
-    if energy <= 0 [ die ]
+    if energy <= 0 [
+      remove-bidding-from who
+      remove-asking-from who
+      die
+    ]
   ]
 end
 
@@ -308,19 +347,33 @@ to update-lorenz-and-gini
       (index / number-of-agents) -
       (wealth-sum-so-far / total-wealth)
   ]
-
-
-
-;;  repeat number-of-agents [
-;;    set wealth-sum-so-far (wealth-sum-so-far + item index sorted-wealths)
-;;    set lorenz-points lput ((wealth-sum-so-far / total-wealth) * 100) lorenz-points
-;;    set index (index + 1)
-;;    set gini-index-reserve
-;;      gini-index-reserve +
-;;      (index / number-of-agents) -
-;;      (wealth-sum-so-far / total-wealth)
-;;  ]
 end
+
+;; this procedure recomputes the value of gini-index-reserve
+;; and the points in lorenz-points for the Lorenz and Gini-Index plots
+to update-lorenz-and-gini2
+  let sorted-wealths sort [wealth] of turtles
+  let total-wealth sum sorted-wealths
+  let wealth-sum-so-far 0
+  let index 0
+  set gini-index-reserve 0
+  set lorenz-points []
+
+  ;; now actually plot the Lorenz curve -- along the way, we also
+  ;; calculate the Gini index.
+  ;; (see the Info tab for a description of the curve and measure)
+  repeat num-people [
+    set wealth-sum-so-far (wealth-sum-so-far + item index sorted-wealths)
+    set lorenz-points lput ((wealth-sum-so-far / total-wealth) * 100) lorenz-points
+    set index (index + 1)
+    set gini-index-reserve
+      gini-index-reserve +
+      (index / num-people) -
+      (wealth-sum-so-far / total-wealth)
+  ]
+end
+
+
 
 
 
@@ -330,11 +383,11 @@ end
 GRAPHICS-WINDOW
 204
 10
-1030
-837
+653
+460
 -1
 -1
-24.8
+13.364
 1
 10
 1
@@ -389,9 +442,9 @@ NIL
 0
 
 PLOT
-1358
+667
 10
-1886
+1195
 336
 Food price
 time
@@ -409,9 +462,9 @@ PENS
 "price bid (std dev)" 1.0 0 -2674135 true "" "plot standard-deviation [optimalpricefood] of turtles"
 
 PLOT
-1352
+663
 340
-1882
+1193
 575
 Totals
 time
@@ -436,7 +489,7 @@ number-of-agents
 number-of-agents
 0
 10000
-1620.0
+120.0
 10
 1
 individuals
@@ -460,10 +513,10 @@ NIL
 0
 
 PLOT
-1128
-540
-1328
-690
+378
+479
+859
+806
 Gini index
 NIL
 NIL
@@ -478,10 +531,10 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot (gini-index-reserve / number-of-agents) / 0.5"
 
 PLOT
-1184
-294
-1384
-444
+79
+463
+279
+613
 Market Spread
 NIL
 NIL
@@ -495,6 +548,44 @@ false
 PENS
 "default" 1.0 0 -16777216 true "" "plot market-spread"
 
+PLOT
+1029
+135
+1386
+570
+Asset owning
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"bottom third" 1.0 1 -16777216 true "" "plot count turtles with [num-stocks <= total-num-stocks / 3 * number-of-agents]"
+"xxx" 1.0 1 -8053223 true "" "plot count turtles with [num-stocks > total-num-stocks / 2 * number-of-agents]"
+
+PLOT
+1068
+496
+1502
+833
+Inequality
+Pop %
+Wealth %
+0.0
+100.0
+0.0
+100.0
+false
+true
+"" ""
+PENS
+"Lorenz Curve" 1.0 0 -10873583 true "" "plot-pen-reset\nset-plot-pen-interval 100 / number-of-agents\nplot 0\nforeach lorenz-points plot"
+"default" 1.0 0 -7500403 true "plot 0\nplot 100" ""
+
 @#$#@#$#@
 ## WHAT IS IT?
 
@@ -503,6 +594,12 @@ PENS
 ## HOW IT WORKS
 
 (what rules the agents use to create the overall behavior of the model)
+
+To observe the equity (or the inequity) of the distribution of wealth, a graphical tool called the Lorenz curve is utilized.  We rank the population by their wealth and then plot the percentage of the population that owns each percentage of the wealth (e.g. 30% of the wealth is owned by 50% of the population).  Hence the ranges on both axes are from 0% to 100%.
+
+Another way to understand the Lorenz curve is to imagine a society of 100 people with a fixed amount of wealth available.  Each individual is 1% of the population.  Rank the individuals in order of their wealth from greatest to least: the poorest individual would have the lowest ranking of 1 and so forth.  Then plot the proportion of the rank of an individual on the y-axis and the portion of wealth owned by this particular individual and all the individuals with lower rankings on the x-axis.  For example, individual Y with a ranking of 20 (20th poorest in society) would have a percentage ranking of 20% in a society of 100 people (or 100 rankings) --- this is the point on the y-axis.  The corresponding plot on the x-axis is the proportion of the wealth that this individual with ranking 20 owns along with the wealth owned by all the individuals with lower rankings (from rankings 1 to 19).  A straight line with a 45 degree incline at the origin (or slope of 1) is a Lorenz curve that represents perfect equality --- everyone holds an equal part of the available wealth.  On the other hand, should only one family or one individual hold all of the wealth in the population (i.e. perfect inequity), then the Lorenz curve will be a backwards "L" where 100% of the wealth is owned by the last percentage proportion of the population.  In practice, the Lorenz curve actually falls somewhere between the straight 45 degree line and the backwards "L".
+
+For a numerical measurement of the inequity in the distribution of wealth, the Gini index (or Gini coefficient) is derived from the Lorenz curve.  To calculate the Gini index, find the area between the 45 degree line of perfect equality and the Lorenz curve.  Divide this quantity by the total area under the 45 degree line of perfect equality (this number is always 0.5 --- the area of 45-45-90 triangle with sides of length 1).  If the Lorenz curve is the 45 degree line then the Gini index would be 0; there is no area between the Lorenz curve and the 45 degree line.  If, however, the Lorenz curve is a backwards "L", then the Gini-Index would be 1 --- the area between the Lorenz curve and the 45 degree line is 0.5; this quantity divided by 0.5 is 1.  Hence, equality in the distribution of wealth is measured on a scale of 0 to 1 --- more inequity as one travels up the scale.  Another way to understand (and equivalently compute) the Gini index, without reference to the Lorenz curve, is to think of it as the mean difference in wealth between all possible pairs of people in the population, expressed as a proportion of the average wealth (see Deltas, 2003 for more).
 
 ## HOW TO USE IT
 
