@@ -11,6 +11,7 @@ globals [
   total-num-stocks ;; (unit: int) number of stocks in the market
   gini-index-reserve ;; (unit: int)
   lorenz-points;; (unit: list)
+  total-wealth;;
 ]
 patches-own [
   p_foodappearonticks ;; value of ticks when food will appear here (if it's in the past => means that food is present)
@@ -128,6 +129,7 @@ to setup-globals
   set stock_bids []
   set stock_asks []
   set total-num-stocks (number-of-agents + (random 9 * number-of-agents))
+  set total-wealth 0
 end
 
 to setup
@@ -238,29 +240,22 @@ to match-market
   if exists_ask and exists_bid [
     let the_ask lowest_ask
     if the_ask <= highest_bid [
-      print (word "[matching market] lowest ask = " the_ask ", highest_bid = " highest_bid)
-      ;; DEBUGGING: report on turtles involved in transaction
-      ;;ask turtle id_for_lowest_ask [
-      ;;  print (word "====> turtle " who " is ASKING; it has " num-stocks " stocks and " money " $")
-      ;;]
-      ;;ask turtle id_for_highest_bid [
-      ;;  print (word "====> turtle " who " is TOP BIDDER; it has " num-stocks " stocks and " money " $")
-      ;;]
+      ;; print (word "[matching market] lowest ask = " the_ask ", highest_bid = " highest_bid)
       ;; update turtles involved in transaction
       ask turtle id_for_lowest_ask [
         set num-stocks (num-stocks - 1)
         set money (money + the_ask)
-        print (word "====> turtle " who " got paid " the_ask " $; it has now " num-stocks " stocks and " money " $")
+        ;; print (word "====> turtle " who " got paid " the_ask " $; it has now " num-stocks " stocks and " money " $")
       ]
       ask turtle id_for_highest_bid [
         set num-stocks (num-stocks + 1)
         set money (money - the_ask)
-        print (word "====> turtle " who " paid " the_ask " $ for a stock; it has now " num-stocks " stocks and " money " $")
+        ;; print (word "====> turtle " who " paid " the_ask " $ for a stock; it has now " num-stocks " stocks and " money " $")
       ]
       ;; update asks and bids
       set stock_bids (but-first stock_bids) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; <========== MISSING ACTUALLY GIVING MONEY, TAKING MONEY!!!!!!
       set stock_asks (but-first stock_asks)
-      print (word "[END matching market] num asks = " (length stock_asks) ", num bids = " (length stock_bids))
+      ;; print (word "[END matching market] num asks = " (length stock_asks) ", num bids = " (length stock_bids))
       ;; and we do it until all matches are satisfied:
       match-market
     ]
@@ -329,7 +324,8 @@ end
 ;; and the points in lorenz-points for the Lorenz and Gini-Index plots
 to update-lorenz-and-gini
   let sorted-wealths sort [money] of turtles
-  let total-wealth sum sorted-wealths
+  let current-num-agents length(sorted-wealths) ;; same as (count turtles)
+  set total-wealth sum sorted-wealths
   let wealth-sum-so-far 0
   let index 0
   set gini-index-reserve 0
@@ -344,46 +340,16 @@ to update-lorenz-and-gini
     set index (index + 1)
     set gini-index-reserve
       gini-index-reserve +
-      (index / number-of-agents) -
+      (index / current-num-agents) -
       (wealth-sum-so-far / total-wealth)
   ]
 end
-
-;; this procedure recomputes the value of gini-index-reserve
-;; and the points in lorenz-points for the Lorenz and Gini-Index plots
-to update-lorenz-and-gini2
-  let sorted-wealths sort [wealth] of turtles
-  let total-wealth sum sorted-wealths
-  let wealth-sum-so-far 0
-  let index 0
-  set gini-index-reserve 0
-  set lorenz-points []
-
-  ;; now actually plot the Lorenz curve -- along the way, we also
-  ;; calculate the Gini index.
-  ;; (see the Info tab for a description of the curve and measure)
-  repeat num-people [
-    set wealth-sum-so-far (wealth-sum-so-far + item index sorted-wealths)
-    set lorenz-points lput ((wealth-sum-so-far / total-wealth) * 100) lorenz-points
-    set index (index + 1)
-    set gini-index-reserve
-      gini-index-reserve +
-      (index / num-people) -
-      (wealth-sum-so-far / total-wealth)
-  ]
-end
-
-
-
-
-
-
 
 @#$#@#$#@
 GRAPHICS-WINDOW
-204
+345
 10
-653
+794
 460
 -1
 -1
@@ -408,10 +374,10 @@ ticks
 30.0
 
 BUTTON
-120
-96
-186
-129
+275
+117
+341
+150
 NIL
 Setup
 NIL
@@ -425,10 +391,10 @@ NIL
 1
 
 BUTTON
-121
-142
-184
-175
+274
+160
+337
+193
 NIL
 go
 T
@@ -442,10 +408,10 @@ NIL
 0
 
 PLOT
-667
-10
-1195
-336
+802
+275
+1169
+534
 Food price
 time
 price
@@ -462,10 +428,10 @@ PENS
 "price bid (std dev)" 1.0 0 -2674135 true "" "plot standard-deviation [optimalpricefood] of turtles"
 
 PLOT
-663
-340
-1193
-575
+801
+12
+1168
+274
 Totals
 time
 totals
@@ -481,25 +447,25 @@ PENS
 "food" 1.0 0 -5509967 true "" "plot count patches with [pcolor = lime + 3]"
 
 SLIDER
--4
-199
-252
-232
+32
+18
+288
+51
 number-of-agents
 number-of-agents
 0
 10000
-120.0
+4080.0
 10
 1
 individuals
 HORIZONTAL
 
 BUTTON
-45
-277
-197
-310
+88
+498
+240
+531
 NIL
 test-asks-and-bids
 NIL
@@ -513,10 +479,10 @@ NIL
 0
 
 PLOT
-378
-479
-859
-806
+1174
+203
+1480
+376
 Gini index
 NIL
 NIL
@@ -525,16 +491,16 @@ NIL
 0.0
 1.0
 true
-true
+false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot (gini-index-reserve / number-of-agents) / 0.5"
+"default" 1.0 0 -16777216 true "" "plot (gini-index-reserve / (count turtles)) / 0.5"
 
 PLOT
-79
-463
-279
-613
+1173
+12
+1479
+199
 Market Spread
 NIL
 NIL
@@ -549,30 +515,11 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot market-spread"
 
 PLOT
-1029
-135
-1386
-570
-Asset owning
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-true
-"" ""
-PENS
-"bottom third" 1.0 1 -16777216 true "" "plot count turtles with [num-stocks <= total-num-stocks / 3 * number-of-agents]"
-"xxx" 1.0 1 -8053223 true "" "plot count turtles with [num-stocks > total-num-stocks / 2 * number-of-agents]"
-
-PLOT
-1068
-496
-1502
-833
-Inequality
+1176
+378
+1483
+619
+Lorenz Curve (Money)
 Pop %
 Wealth %
 0.0
@@ -580,11 +527,11 @@ Wealth %
 0.0
 100.0
 false
-true
+false
 "" ""
 PENS
-"Lorenz Curve" 1.0 0 -10873583 true "" "plot-pen-reset\nset-plot-pen-interval 100 / number-of-agents\nplot 0\nforeach lorenz-points plot"
-"default" 1.0 0 -7500403 true "plot 0\nplot 100" ""
+"Lorenz Curve" 1.0 0 -10873583 true "" "plot-pen-reset\nset-plot-pen-interval 100 / (count turtles)\nplot 0\nforeach lorenz-points plot"
+"Perfect Equality" 100.0 0 -7500403 true "plot 0\nplot 100" ""
 
 @#$#@#$#@
 ## WHAT IS IT?
